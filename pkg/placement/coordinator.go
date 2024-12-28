@@ -135,10 +135,12 @@ func (c *Coordinator) FindNodeForPod(pod v1.Pod, allowAI bool) (string, error) {
 		c.log.Error(err, "Failed to get node metrics")
 		return "", err
 	}
+	// Flatten nodeMetricsList items into JSON
 	nodeMetricsListJson, err := json.Marshal(nodeMetricsList)
 	if err != nil {
 		return "", err
 	}
+	// Get relatives that have a different name from the current pod
 	relatives, err := c.findRelatives(pod)
 	if err != nil {
 		c.log.Error(err, "Failed to get relatives")
@@ -153,12 +155,16 @@ func (c *Coordinator) FindNodeForPod(pod v1.Pod, allowAI bool) (string, error) {
 			relative_placement[fmt.Sprintf("%s is a related pod and resides on", relative.Name)] = nodeName
 		}
 	}
+	// Formulate the prompt
 	combinedPrompt := fmt.Sprintf(prompt.Standard, nodeMetricsListJson, k8sgptAnalysis, relative_placement)
+	// Send the query to the AI backend
 	response, err := c.k8sgptClient.Query(combinedPrompt)
 	if err != nil {
 		return "", err
 	}
+	// Print the raw response for debugging
 	fmt.Printf("Response: %s\n", response)
+	// Trim response to avoid trailing/leading spaces or newlines
 	response = strings.TrimSpace(response)
 	// Direct match check
 	for _, node := range nodeMetricsList.Items {
@@ -186,10 +192,12 @@ func (c *Coordinator) FindNodeForPod(pod v1.Pod, allowAI bool) (string, error) {
 			}
 		}
 	}
+	// Increment failure counter if no match found
 	placementFailureCounter := c.metricsBuilder.GetCounterVec("schednex_placement_failure")
 	if placementFailureCounter != nil {
 		placementFailureCounter.WithLabelValues("schednex", "placement").Inc()
 	}
+	// Fallback to default scheduler
 	c.log.Info("Delegating to default scheduler")
 	patchData := []byte(`{"spec": {"schedulerName": null}}`)
 	_, err = c.kubernetesClient.CoreV1().Pods(pod.Namespace).Patch(
